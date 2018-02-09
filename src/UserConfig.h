@@ -1,5 +1,5 @@
-#ifndef OPENCLBC_USER_CONFIG_H
-#define OPENCLBC_USER_CONFIG_H
+#ifndef CLCOV_USER_CONFIG_HEADER_
+#define CLCOV_USER_CONFIG_HEADER_
 
 #include <string>
 #include <set>
