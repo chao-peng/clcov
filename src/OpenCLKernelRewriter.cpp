@@ -68,8 +68,8 @@ public:
     bool VisitFunctionDecl(FunctionDecl *f) {
         SourceLocation locStart, locEnd;
         SourceRange sr;
-        locStart = f->getLocStart();
-        locEnd = f->getLocStart().getLocWithOffset(8);
+        locStart = f->getBeginLoc();
+        locEnd = f->getEndLoc().getLocWithOffset(8);
         sr.setBegin(locStart);
         sr.setEnd(locEnd);
         
@@ -136,10 +136,10 @@ public:
             // Deal with If
             // Record details of this condition
             IfStmt *IfStatement = cast<IfStmt>(s);
-            std::string locIfStatement = IfStatement->getLocStart().printToString(myRewriter.getSourceMgr());
+            std::string locIfStatement = IfStatement->getBeginLoc().printToString(myRewriter.getSourceMgr());
             std::string conditionIfStatement = myRewriter.getRewrittenText(IfStatement->getCond()->getSourceRange());
-            SourceLocation conditionStart = myRewriter.getSourceMgr().getFileLoc(IfStatement->getCond()->getLocStart());
-            SourceLocation conditionEnd = myRewriter.getSourceMgr().getFileLoc(IfStatement->getCond()->getLocEnd());
+            SourceLocation conditionStart = myRewriter.getSourceMgr().getFileLoc(IfStatement->getCond()->getBeginLoc());
+            SourceLocation conditionEnd = myRewriter.getSourceMgr().getFileLoc(IfStatement->getCond()->getEndLoc());
             SourceRange conditionRange;
             conditionRange.setBegin(conditionStart);
             conditionRange.setEnd(conditionEnd);
@@ -154,7 +154,7 @@ public:
                 // Then is a compound statement
                 // Add coverage recorder to the end of the compound
                 myRewriter.InsertTextAfter(
-                    Then->getLocStart().getLocWithOffset(1),
+                    Then->getBeginLoc().getLocWithOffset(1),
                     stmtRecordCoverage(2 * numConditions)
                     );
             } else {
@@ -162,9 +162,9 @@ public:
                 // decorate it with {} and add coverage recorder
                 // Need to be aware of a statement with macros
                 SourceLocation startLoc = myRewriter.getSourceMgr().getFileLoc(
-                    Then->getLocStart());
+                    Then->getBeginLoc());
                 SourceLocation endLoc = myRewriter.getSourceMgr().getFileLoc(
-                    Then->getLocEnd());
+                    Then->getEndLoc());
                 SourceRange newRange;
                 newRange.setBegin(startLoc);
                 newRange.setEnd(endLoc);
@@ -202,7 +202,7 @@ public:
                     // Else is a compound statement
                     // Add coverage recorder to the end of the compound
                     myRewriter.InsertTextAfter(
-                        Else->getLocStart().getLocWithOffset(1),
+                        Else->getBeginLoc().getLocWithOffset(1),
                         stmtRecordCoverage(2 * numConditions + 1)
                         );
                 } else if (isa<IfStmt>(Else)) {
@@ -212,20 +212,20 @@ public:
                         << stmtRecordCoverage(2 * numConditions + 1)
                         << "\n";
                     myRewriter.InsertTextAfter(
-                        Else->getLocStart(),
+                        Else->getBeginLoc(),
                         ss.str()
                     );
                     myRewriter.InsertTextAfter(
-                        Else->getLocEnd().getLocWithOffset(2),
+                        Else->getEndLoc().getLocWithOffset(2),
                         "}\n"
                     );
                 } else {
                     // Else is a single statement
                     // decorate it with {} and add coverage recorder
                     SourceLocation startLoc = myRewriter.getSourceMgr().getFileLoc(
-                        Else->getLocStart());
+                        Else->getBeginLoc());
                     SourceLocation endLoc = myRewriter.getSourceMgr().getFileLoc(
-                        Else->getLocEnd());
+                        Else->getEndLoc());
                     SourceRange newRange;
                     newRange.setBegin(startLoc);
                     newRange.setEnd(endLoc);
@@ -259,9 +259,9 @@ public:
         } else if (isa<CallExpr>(s)){
             CallExpr *functionCall = cast<CallExpr>(s);
             SourceLocation startLoc = myRewriter.getSourceMgr().getFileLoc(
-                    functionCall->getCallee()->getLocStart());
+                    functionCall->getCallee()->getBeginLoc());
             SourceLocation endLoc = myRewriter.getSourceMgr().getFileLoc(
-                    functionCall->getCallee()->getLocEnd());
+                    functionCall->getCallee()->getEndLoc());
             SourceRange newRange;
             newRange.setBegin(startLoc);
             newRange.setEnd(endLoc);
@@ -269,20 +269,20 @@ public:
             functionName = originalRewriter.getRewrittenText(functionCall->getCallee()->getSourceRange());
             if (setFunctions.find(functionName) != setFunctions.end()){
                 myRewriter.InsertTextAfter(
-                    functionCall->getLocEnd().getLocWithOffset(0),
+                    functionCall->getEndLoc().getLocWithOffset(0),
                     localRecorderArgument()
                 );
             }
             if (functionName == "barrier") {
                 //Since people usually use OpenCL pre-defined macros as the argument of barrier
                 //It's better to use SourceMgr getFileLoc here to retrieve the argument
-                std::string locBarrierCall = functionCall->getLocStart().printToString(myRewriter.getSourceMgr());
+                std::string locBarrierCall = functionCall->getBeginLoc().printToString(myRewriter.getSourceMgr());
                 barrierLineMap[numBarriers] = correctSourceLine(locBarrierCall, numAddedLines);
 
                 Expr* barrierArg = functionCall->getArg(0);
                 std::stringstream newBarrierCall;
-                SourceLocation barrierArgStartLoc = myRewriter.getSourceMgr().getFileLoc(barrierArg->getLocStart());
-                SourceLocation barrierArgEndLoc = myRewriter.getSourceMgr().getFileLoc(barrierArg->getLocEnd());
+                SourceLocation barrierArgStartLoc = myRewriter.getSourceMgr().getFileLoc(barrierArg->getBeginLoc());
+                SourceLocation barrierArgEndLoc = myRewriter.getSourceMgr().getFileLoc(barrierArg->getEndLoc());
                 SourceRange barrierArgRange;
                 barrierArgRange.setBegin(barrierArgStartLoc);
                 barrierArgRange.setEnd(barrierArgEndLoc);
@@ -306,8 +306,8 @@ public:
         // If it is a kernel function, typeString = "__kernel"
         SourceLocation locStart, locEnd;
         SourceRange sr;
-        locStart = f->getLocStart();
-        locEnd = f->getLocStart().getLocWithOffset(8);
+        locStart = f->getBeginLoc();
+        locEnd = f->getBeginLoc().getLocWithOffset(8);
         sr.setBegin(locStart);
         sr.setEnd(locEnd);
         std::string typeString = myRewriter.getRewrittenText(sr);
@@ -320,16 +320,16 @@ public:
                 std::string funcSourceText = myRewriter.getRewrittenText(funcSourceRange);
                 std::string funcFirstLine = funcSourceText.substr(0, funcSourceText.find_first_of('{'));
                 unsigned offset = funcFirstLine.find_last_of(')');
-                SourceLocation loc = f->getLocStart().getLocWithOffset(offset);
+                SourceLocation loc = f->getBeginLoc().getLocWithOffset(offset);
                 myRewriter.InsertTextAfter(loc, declRecorder(needComma));
 
                 // define recorder array as __local array
-                loc = f->getBody()->getLocStart().getLocWithOffset(1);
+                loc = f->getBody()->getBeginLoc().getLocWithOffset(1);
                 myRewriter.InsertTextAfter(loc, declLocalRecorder());
                 
                 // update local recorder to global recorder array
                 if (countConditions){
-                    loc = f->getBody()->getLocEnd();
+                    loc = f->getBody()->getEndLoc();
                     myRewriter.InsertTextAfter(loc, stmtUpdateGlobalRecorder());
                 }
 
@@ -340,7 +340,7 @@ public:
             }
             else {
                 // add global recorder array as argument to function prototype
-                SourceLocation loc = f->getLocEnd();
+                SourceLocation loc = f->getEndLoc();
                 myRewriter.InsertTextBefore(loc, declRecorder(needComma));
             }
         } else {
@@ -351,11 +351,11 @@ public:
                 std::string funcSourceText = myRewriter.getRewrittenText(funcSourceRange);
                 std::string funcFirstLine = funcSourceText.substr(0, funcSourceText.find_first_of('{'));
                 unsigned offset = funcFirstLine.find_last_of(')');
-                SourceLocation loc = f->getLocStart().getLocWithOffset(offset);
+                SourceLocation loc = f->getBeginLoc().getLocWithOffset(offset);
                 myRewriter.InsertTextAfter(loc, declLocalRecorderArgument(needComma));
             } else {
                 // If it is a function declaration without definition
-                SourceLocation loc = f->getLocEnd();
+                SourceLocation loc = f->getEndLoc();
                 myRewriter.InsertTextBefore(loc, declLocalRecorderArgument(needComma));
             }
         }

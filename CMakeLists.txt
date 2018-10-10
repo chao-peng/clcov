@@ -12,7 +12,7 @@ add_clang_executable(clcov
     src/UserConfig.cpp
     src/UserConfig.h)
         
-target_link_libraries(clcov
+target_link_libraries(clcov PRIVATE
     clangAST
     clangASTMatchers
     clangBasic
