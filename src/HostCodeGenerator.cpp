@@ -15,6 +15,7 @@ void HostCodeGenerator::initialise(UserConfig* userConfig, int newNumConditions,
     kernelFunctionName = userConfig->getValue("kernel_function_name");
     branchRecorderArrayName = kernelFunctionName + "_branch_coverage_recorder";
     barrierRecorderArrayName = kernelFunctionName + "_barrier_divergence_recorder";
+    loopRecorderArrayName = kernelFunctionName + "_loop_coverage_recorder";
     clContext = userConfig->getValue("cl_context");
     errorCodeVariable = userConfig->getValue("error_code_variable");
     clCommandQueue = userConfig->getValue("cl_command_queue");
