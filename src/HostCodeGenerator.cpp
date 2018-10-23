@@ -11,7 +11,7 @@ HostCodeGenerator::HostCodeGenerator(){
     setArgumentPartHostCode << "Part 2 - set argument to kernel function\n";
 }
 
-void HostCodeGenerator::initialise(UserConfig* userConfig, int newNumConditions, int newNumBarriers){
+void HostCodeGenerator::initialise(UserConfig* userConfig, int newNumConditions, int newNumBarriers, int newNumLoops){
     kernelFunctionName = userConfig->getValue("kernel_function_name");
     branchRecorderArrayName = kernelFunctionName + "_branch_coverage_recorder";
     barrierRecorderArrayName = kernelFunctionName + "_barrier_divergence_recorder";
@@ -20,6 +20,7 @@ void HostCodeGenerator::initialise(UserConfig* userConfig, int newNumConditions,
     clCommandQueue = userConfig->getValue("cl_command_queue");
     numConditions = newNumConditions;
     numBarriers = newNumBarriers;
+    numLoops = newNumLoops;
 }
 
 void HostCodeGenerator::setArgument(std::string functionName, int argumentLocation){
@@ -30,6 +31,10 @@ void HostCodeGenerator::setArgument(std::string functionName, int argumentLocati
     if(numBarriers){
         setArgumentPartHostCode 
             << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation << ", sizeof(cl_mem), &d_" << barrierRecorderArrayName << ");\n";
+    }
+    if (numLoops) {
+        setArgumentPartHostCode 
+            << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation << ", sizeof(cl_mem), &d_" << loopRecorderArrayName << ");\n";
     }
 }
 
@@ -51,6 +56,11 @@ void HostCodeGenerator::generateHostCode(std::string dataFilePath){
             << "cl_mem d_" << barrierRecorderArrayName << " = clCreateBuffer(" << clContext << ", CL_MEM_READ_WRITE, sizeof(int)*" << numBarriers << ", NULL, &" << errorCodeVariable << ");\n"
             << errorCodeVariable << " = clEnqueueWriteBuffer(" << clCommandQueue << ", d_" << barrierRecorderArrayName << ", CL_TRUE, 0, " << numBarriers << "*sizeof(int)," << barrierRecorderArrayName << ", 0, NULL ,NULL);\n\n";
     }
+    if (numLoops){
+        generatedHostCode << "int " << loopRecorderArrayName << "[" << numLoops << "] = {0};\n" // Barrier divergence checker
+            << "cl_mem d_" << loopRecorderArrayName << " = clCreateBuffer(" << clContext << ", CL_MEM_READ_WRITE, sizeof(int)*" << numLoops << ", NULL, &" << errorCodeVariable << ");\n"
+            << errorCodeVariable << " = clEnqueueWriteBuffer(" << clCommandQueue << ", d_" << loopRecorderArrayName << ", CL_TRUE, 0, " << numLoops << "*sizeof(int)," << loopRecorderArrayName << ", 0, NULL ,NULL);\n\n";
+    }
     // Host code part 2 - set argument to kernel function
     generatedHostCode << setArgumentPartHostCode.str() << "\n";
 
@@ -63,6 +73,10 @@ void HostCodeGenerator::generateHostCode(std::string dataFilePath){
     if (numBarriers){
         generatedHostCode
             << errorCodeVariable << " = clEnqueueReadBuffer(" << clCommandQueue << ", d_" << barrierRecorderArrayName << ", CL_TRUE, 0, sizeof(int)*" << numBarriers << ", " << barrierRecorderArrayName << ", 0, NULL, NULL);\n\n";
+    }
+    if (numLoops){
+        generatedHostCode
+            << errorCodeVariable << " = clEnqueueReadBuffer(" << clCommandQueue << ", d_" << loopRecorderArrayName << ", CL_TRUE, 0, sizeof(int)*" << numLoops << ", " << loopRecorderArrayName << ", 0, NULL, NULL);\n\n";
     }
 
     // Host code part 4 - print result
@@ -117,6 +131,21 @@ void HostCodeGenerator::generateHostCode(std::string dataFilePath){
             << "  }\n"
             << "}\n";
     }
+    if (numLoops){
+        generatedHostCode
+            << "int openclbc_total_loop = " << numLoops << ";\n"
+            << "for (int cov_test_i = 0; cov_test_i < " << numLoops << "; ++cov_test_i){\n"
+            << "  if (" << loopRecorderArrayName << "[cov_test_i] & 1 == 1) {\n" 
+            << "    printf(\"\\x1B[31mLoop %d was once not executed\\x1B[0m\\n\", cov_test);\n"
+            << "  if (" << loopRecorderArrayName << "[cov_test_i] & 2 == 2) {\n" 
+            << "    printf(\"\\x1B[31mLoop %d was once executed once\\x1B[0m\\n\", cov_test);\n"
+            << "  if (" << loopRecorderArrayName << "[cov_test_i] & 4 == 4) {\n" 
+            << "    printf(\"\\x1B[31mLoop %d was once executed more than once\\x1B[0m\\n\", cov_test);\n"
+            << "  if (" << loopRecorderArrayName << "[cov_test_i] & 8 == 8) {\n" 
+            << "    printf(\"\\x1B[31mLoop %d once reached the boundary\\x1B[0m\\n\", cov_test);\n"
+            << "  }\n"
+            << "}\n";
+    }
     if (numConditions){
         generatedHostCode
             << "openclbc_result = (double)openclbc_covered_branches / (double)openclbc_total_branches *100.0;\n"
@@ -143,6 +172,6 @@ bool HostCodeGenerator::isHostCodeComplete(){
     if (this->clContext.empty()) return false;
     if (this->errorCodeVariable.empty()) return false;
     if (this->kernelFunctionName.empty()) return false;
-    if (this->numBarriers==0 && this->numConditions==0) return false;
+    if (this->numBarriers==0 && this->numConditions==0 && this->numLoops==0) return false;
     return true;
 }

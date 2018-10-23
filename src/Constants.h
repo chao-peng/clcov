@@ -9,7 +9,7 @@ namespace kernel_rewriter_constants{
     const char* const GLOBAL_LOOP_RECORDER_NAME = "ocl_kernel_loop_recorder";
     const char* const LOCAL_LOOP_RECORDER_NAME = "my_ocl_kernel_loop_recorder";
     const char* const PRIVATE_LOOP_ITERATION_COUNTER = "private_ocl_kernel_loop_iter_counter";
-    const char* const PRIVATE_LOOP_BOUNDARY_RECORDER = "private_ocl_kernel_loop_boundary_reached";
+    const char* const PRIVATE_LOOP_BOUNDARY_RECORDER = "private_ocl_kernel_loop_boundary_not_reached";
     const int LOOP_NOT_EXECUTED = 1;
     const int LOOP_EXECUTED_ONCE = 2;
     const int LOOP_EXECUTED_MORE_THAN_ONCE = 4;

@@ -64,7 +64,7 @@ public:
             if (functionName == "barrier") {
                 countBarriers++;
             }
-        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s)/* || isa<DoStmt>(s)*/) {
+        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s) || isa<DoStmt>(s)) {
             countLoops++;
         }
         return true;
@@ -297,10 +297,11 @@ public:
 
                 numBarriers++;
             }
-        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s)/* || isa<DoStmt>(s)*/) {
+        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s) || isa<DoStmt>(s)) {
             std::stringstream loop_counter_init;
             const Expr* loopCond;
             const Stmt* loopBody;
+            int offsetForRewrittingCond = 1;
             // Before the loop, initialise loop counter and boundary recorder
             // Need to determine if the loop needs surrounding curly braces e.g.
             /*
@@ -333,6 +334,13 @@ public:
                 loopBody = whileLoop->getBody();
             }
 
+            if (isa<DoStmt>(s)) {
+                DoStmt* doLoop = cast<DoStmt>(s);
+                loopCond = doLoop->getCond();
+                loopBody = doLoop->getBody();
+                offsetForRewrittingCond = 2;
+            }
+
             SourceLocation loopBodyStartLoc = myRewriter.getSourceMgr().getFileLoc(loopBody->getBeginLoc());
             SourceLocation loopBodyEndLoc = myRewriter.getSourceMgr().getFileLoc(loopBody->getEndLoc());
             SourceRange loopBodyFileRange;
@@ -355,7 +363,11 @@ public:
                                         originalRewriter.getRewrittenText(loopBodyFileRange).length()+1,
                                         sourceStrStream.str());
             }
-            myRewriter.InsertTextAfter(loopBodyFileRange.getEnd(), stmtRecordLoopExecStatus(numLoops));
+
+            // update the loop array
+            
+
+            myRewriter.InsertTextAfter(s->getEndLoc().getLocWithOffset(offsetForRewrittingCond), stmtRecordLoopExecStatus(numLoops));
             
             /*
             if (!isa<CompoundStmt>(ST) && !isa<IfStmt>(ST)) {
@@ -479,7 +491,8 @@ private:
 
     std::string stmtRecordLoopExecStatus(const int& id) {
         std::stringstream ss;
-        ss  << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] == 0) {\n"
+        ss  << "\n"
+            << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] == 0) {\n"
             << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 1);\n}"
             << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] == 1) {\n"
             << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 2);\n}"
@@ -720,11 +733,11 @@ int rewriteOpenclKernel(ClangTool* tool, std::string newOutputDirectory, UserCon
     llvm::outs() << "Stage 1/2: code invastigation\n";
     tool->run(newFrontendActionFactory<ASTFrontendActionForKernelInvastigator>().get());    
 
-    if (countConditions == 0 && countBarriers == 0){
+    if (countConditions == 0 && countBarriers == 0 && countLoops == 0){
         return error_code::NO_NEED_TO_TEST_COVERAGE;
     }
 
-    hostCodeGenerator.initialise(userConfig, countConditions, countBarriers);
+    hostCodeGenerator.initialise(userConfig, countConditions, countBarriers, countLoops);
     
     llvm::outs() << "Stage 2/2: rewritting code\n";
     tool->run(newFrontendActionFactory<ASTFrontendActionForKernelRewriter>().get());

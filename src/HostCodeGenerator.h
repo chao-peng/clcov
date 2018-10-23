@@ -11,11 +11,13 @@ private:
     std::string kernelFunctionName;
     std::string branchRecorderArrayName;
     std::string barrierRecorderArrayName;
+    std::string loopRecorderArrayName;
     std::string clContext;
     std::string errorCodeVariable;
     std::string clCommandQueue;
     int numConditions;
     int numBarriers;
+    int numLoops;
 
     std::stringstream setArgumentPartHostCode;
     std::stringstream generatedHostCode;
@@ -23,7 +25,7 @@ private:
 public:
     HostCodeGenerator();
 
-    void initialise(UserConfig* userConfig, int newNumConditions, int newNumBarriers);
+    void initialise(UserConfig* userConfig, int newNumConditions, int newNumBarriers, int newNumLoops);
 
     void setArgument(std::string functionName, int argumentLocation);
 
