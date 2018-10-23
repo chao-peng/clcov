@@ -42,6 +42,10 @@ int numBarriers;
 int countBarriers;
 std::map<int, std::string> barrierLineMap;
 
+int numLoops;
+int countLoops;
+std::map<int, std::string> LoopMap;
+
 // Variables below are used to generate host code
 HostCodeGenerator hostCodeGenerator;
 
@@ -60,6 +64,8 @@ public:
             if (functionName == "barrier") {
                 countBarriers++;
             }
+        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s)/* || isa<DoStmt>(s)*/) {
+            countLoops++;
         }
         return true;
     }
@@ -74,7 +80,7 @@ public:
         sr.setEnd(locEnd);
         
         std::string typeString = myRewriter.getRewrittenText(sr);
-        if (typeString != "__kernel"){
+        if (typeString != "__kernel" || typeString != "kernel"){
             if (f->hasBody()){
                 setFunctions.insert(f->getQualifiedNameAsString());
             }
@@ -129,7 +135,7 @@ private:
 // 4. Add the pointer to the global recorder array as the last argument to the kernel entry function 
 class RecursiveASTVisitorForKernelRewriter : public RecursiveASTVisitor<RecursiveASTVisitorForKernelRewriter> {
 public:
-    explicit RecursiveASTVisitorForKernelRewriter(Rewriter &r, Rewriter &original_r) : myRewriter(r), originalRewriter (original_r){}
+    explicit RecursiveASTVisitorForKernelRewriter(Rewriter &r, Rewriter &original_r, ASTContext *astcontext) : myRewriter(r), originalRewriter (original_r), context(astcontext){}
     
     bool VisitStmt(Stmt *s) {
         if (isa<IfStmt>(s)) {
@@ -291,6 +297,83 @@ public:
 
                 numBarriers++;
             }
+        } else if (isa<ForStmt>(s) || isa<WhileStmt>(s)/* || isa<DoStmt>(s)*/) {
+            std::stringstream loop_counter_init;
+            const Expr* loopCond;
+            const Stmt* loopBody;
+            // Before the loop, initialise loop counter and boundary recorder
+            // Need to determine if the loop needs surrounding curly braces e.g.
+            /*
+                if (COND)
+                    // location where initialisation statements will be added
+                    for (;;)
+            */
+            // However if-visitor will add curly braces
+            /*
+            const auto& parents = context->getParents(*s);
+            const Stmt* ST = parents[0].get<Stmt>();
+            if (!isa<CompoundStmt>(ST) && !isa<IfStmt>(ST)) {
+                loop_counter_init << "{\n";
+            }
+            */
+            loop_counter_init << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << numLoops << "] = 0;\n"
+                            << kernel_rewriter_constants::PRIVATE_LOOP_BOUNDARY_RECORDER << "[" << numLoops << "] = true;\n";
+            myRewriter.InsertTextBefore(s->getBeginLoc(), loop_counter_init.str());
+            if (isa<ForStmt>(s)) {
+                ForStmt *forLoop = cast<ForStmt>(s);
+                //const Stmt* forInit = forLoop->getInit();
+                loopCond = forLoop->getCond();
+                //const Expr* forInc = forLoop->getInc();
+                loopBody = forLoop->getBody();
+            }
+
+            if (isa<WhileStmt>(s)) {
+                WhileStmt *whileLoop = cast<WhileStmt>(s);
+                loopCond = whileLoop->getCond();
+                loopBody = whileLoop->getBody();
+            }
+
+            SourceLocation loopBodyStartLoc = myRewriter.getSourceMgr().getFileLoc(loopBody->getBeginLoc());
+            SourceLocation loopBodyEndLoc = myRewriter.getSourceMgr().getFileLoc(loopBody->getEndLoc());
+            SourceRange loopBodyFileRange;
+            loopBodyFileRange.setBegin(loopBodyStartLoc);
+            loopBodyFileRange.setEnd(loopBodyEndLoc);
+
+            // If the body of the foor loop is not compound, we need to add extra curly braces
+            if (isa<CompoundStmt>(loopBody)){ // Compound body
+                myRewriter.InsertTextAfter(
+                    loopBodyFileRange.getBegin().getLocWithOffset(1),
+                    stmtLoopIterInc(numLoops)
+                );
+            } else { // Single Statement
+                std::stringstream sourceStrStream;
+                sourceStrStream << "{\n"
+                                << stmtLoopIterInc(numLoops)
+                                << myRewriter.getRewrittenText(loopBodyFileRange) << "\n"
+                                << "}\n";
+                myRewriter.ReplaceText(loopBodyFileRange.getBegin(),
+                                        originalRewriter.getRewrittenText(loopBodyFileRange).length()+1,
+                                        sourceStrStream.str());
+            }
+            myRewriter.InsertTextAfter(loopBodyFileRange.getEnd(), stmtRecordLoopExecStatus(numLoops));
+            
+            /*
+            if (!isa<CompoundStmt>(ST) && !isa<IfStmt>(ST)) {
+                myRewriter.InsertTextAfter(s->getEndLoc(), "}\n");
+            }
+            */
+
+            // rewrite the condition stmt of the loop
+            SourceLocation loopCondStartLoc = myRewriter.getSourceMgr().getFileLoc(loopCond->getBeginLoc());
+            SourceLocation loopCondEndLoc = myRewriter.getSourceMgr().getFileLoc(loopCond->getEndLoc());
+            SourceRange loopCondFileRange;
+            loopCondFileRange.setBegin(loopCondStartLoc);
+            loopCondFileRange.setEnd(loopCondEndLoc);
+            std::stringstream newCondExpr;
+            newCondExpr << myRewriter.getRewrittenText(loopCondFileRange) << exprLoopBoundaryReached(numLoops);
+            myRewriter.ReplaceText(loopCondFileRange, newCondExpr.str());
+            //myRewriter.InsertTextAfter(loopCond->getEndLoc(), exprLoopBoundaryReached(numLoops));
+            numLoops++;
         }
         
         return true;
@@ -365,6 +448,7 @@ public:
 private:
     Rewriter &myRewriter;
     Rewriter &originalRewriter;
+    ASTContext *context;
 
     std::string stmtRecordCoverage(const int& id){
         std::stringstream ss;
@@ -375,17 +459,63 @@ private:
         return ss.str();
     }
 
+    std::string stmtLoopIterInc(const int& id) {
+        std::stringstream ss;
+        ss << "\n" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "]++;\n";
+        return ss.str();
+    }
+
+    std::string stmtRecordLoopCoverage(const int& id, const int& flag) {
+        std::stringstream ss;
+        ss << "\natomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], " << flag << ");\n";
+        return ss.str();
+    }
+
+    std::string exprLoopBoundaryReached(const int& id) {
+        std::stringstream ss;
+        ss << " || (" << kernel_rewriter_constants::PRIVATE_LOOP_BOUNDARY_RECORDER << "[" << id << "] = false)"; 
+        return ss.str();
+    }
+
+    std::string stmtRecordLoopExecStatus(const int& id) {
+        std::stringstream ss;
+        ss  << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] == 0) {\n"
+            << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 1);\n}"
+            << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] == 1) {\n"
+            << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 2);\n}"
+            << "if (" << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << id << "] > 1) {\n"
+            << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 4);\n}"
+            << "if (!" << kernel_rewriter_constants::PRIVATE_LOOP_BOUNDARY_RECORDER << "[" << id << "]) {\n"
+            << "    atomic_or(&" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << id << "], 8);\n}";
+        return ss.str();
+    }
+
     std::string declRecorder(bool needComma=true){
         std::stringstream ss;
-        if (needComma) ss << ", ";
-        if (countConditions){
-            ss << "__global int* " << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME;
-            if (countBarriers){
-                ss << ", __global int* " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME;
+
+        if (countConditions) {
+            if (needComma) {
+                ss << ", __global int* " << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME;
+            } else {
+                ss << "__global int* " << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME;
             }
-        } else {
-            if (countBarriers){
+            needComma = true;
+        }
+
+        if (countBarriers) {
+            if (needComma) {
+                ss << ", __global int* " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME;
+            } else {
                 ss << "__global int* " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME;
+            }
+            needComma = true;
+        }
+
+        if (countLoops) {
+            if (needComma) {
+                ss << ", __global int* " << kernel_rewriter_constants::GLOBAL_LOOP_RECORDER_NAME;
+            } else {
+                ss << "__global int* " << kernel_rewriter_constants::GLOBAL_LOOP_RECORDER_NAME;
             }
         }
         return ss.str();
@@ -394,31 +524,57 @@ private:
     std::string declLocalRecorder(){
         std::stringstream ss;
         if (countConditions){
-            ss << "__local int " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[" << 2 * countConditions << "];\n";
+            ss << "__local int " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[" << 2 * countConditions << "];\n"
+               << "for (int ocl_kernel_init_i = 0; ocl_kernel_init_i < " << 2 * countConditions << "; ++ocl_kernel_init_i) {\n"
+               << "    " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[ocl_kernel_init_i] = 0;\n}\n";
         }
         if (countBarriers){
-            ss << "__local int " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME << "[" << countBarriers << "];\n";
+            ss << "__local int " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME << "[" << countBarriers << "];\n"
+               << "for (int ocl_kernel_init_i = 0; ocl_kernel_init_i < " << countBarriers << "; ++ocl_kernel_init_i) {\n"
+               << "    " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME << "[ocl_kernel_init_i] = 0;\n}\n";
         }
+        if (countLoops) {
+            ss << "__local int " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[" << countLoops << "];\n"
+               << "for (int ocl_kernel_init_i = 0; ocl_kernel_init_i < " << countLoops << "; ++ocl_kernel_init_i) {\n"
+               << "    " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[ocl_kernel_init_i] = 0;\n}\n";
+            ss << "int " << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << countLoops << "];\n";
+            ss << "bool " << kernel_rewriter_constants::PRIVATE_LOOP_BOUNDARY_RECORDER << "[" << countLoops << "];\n";
+        }
+        ss << "barrier(LOCAL_MEM_FENCE || GLOBAL_MEM_FENCE);\n";
         return ss.str();
     }
 
     std::string declLocalRecorderArgument(bool needComma=true){
         std::stringstream ss;
-        if (needComma){
-            ss << ", ";
+
+        if (countConditions) {
+            if (needComma){
+                ss << ", __local int* " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME;
+            } else {
+                ss << "__local int* " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME;
+            }
+            needComma = true;
         }
-        if (countConditions){
-            ss << "__local int* " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME;
-            if (countBarriers){
+
+        if (countBarriers) {
+            if (needComma) {
                 ss << ", __global int* " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME
                     << ", __local int* " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME;
-            }
-        } else {
-            if (countBarriers){
+            } else {
                 ss << "__global int* " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME
                     << ", __local int* " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME;
             }
+            needComma = true;
         }
+        
+        if (countLoops) {
+            if (needComma) {
+                ss << ", __local int* " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME;
+            } else {
+                ss << "__local int*" << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME;
+            }
+        }
+
         return ss.str();
     }
 
@@ -431,6 +587,9 @@ private:
             ss << ", " << kernel_rewriter_constants::GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME
                     << ", " << kernel_rewriter_constants::LOCAL_BARRIER_COUNTER_NAME;
         }
+        if (countLoops) {
+            ss << ", " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME;
+        }
         return ss.str();
     }
 
@@ -438,6 +597,9 @@ private:
         std::stringstream ss;
         ss << "for (int update_recorder_i = 0; update_recorder_i < " << (countConditions*2) << "; update_recorder_i++) { \n";
         ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[update_recorder_i]); \n";
+        ss << "}\n";
+        ss << "for (int update_recorder_i = 0; update_recorder_i < " << countLoops << "; update_recorder_i++) { \n";
+        ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_LOOP_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[update_recorder_i]); \n";
         ss << "}\n";
         return ss.str();
     }
@@ -456,7 +618,7 @@ private:
 
 class ASTConsumerForKernelRewriter : public ASTConsumer{
 public:
-    ASTConsumerForKernelRewriter(Rewriter &r, Rewriter &original_r) : visitor(r, original_r) {}
+    ASTConsumerForKernelRewriter(Rewriter &r, Rewriter &original_r, ASTContext* context) : visitor(r, original_r, context) {}
 
     bool HandleTopLevelDecl(DeclGroupRef DR) override {
         for (DeclGroupRef::iterator b = DR.begin(), e = DR.end(); b != e; ++b) {
@@ -535,7 +697,7 @@ public:
             outputFileName = outputFileName.append(inputFileName.substr(inputFileName.find_last_of("/") + 1, inputFileName.size() - inputFileName.find_last_of("/") - 1));
             myRewriter.setSourceMgr(ci.getSourceManager(), ci.getLangOpts());
             originalRewriter.setSourceMgr(ci.getSourceManager(), ci.getLangOpts());
-            return llvm::make_unique<ASTConsumerForKernelRewriter>(myRewriter, originalRewriter);
+            return llvm::make_unique<ASTConsumerForKernelRewriter>(myRewriter, originalRewriter, &ci.getASTContext());
     }
 
 private:
@@ -549,10 +711,13 @@ int rewriteOpenclKernel(ClangTool* tool, std::string newOutputDirectory, UserCon
     countConditions = 0;
     countBarriers = 0;
     numBarriers = 0;
+    numLoops = 0;
+    countLoops = 0;
     numAddedLines = userConfig->getNumAddedLines();
     outputDirectory = newOutputDirectory;
     outputFileName = newOutputDirectory;
 
+    llvm::outs() << "Stage 1/2: code invastigation\n";
     tool->run(newFrontendActionFactory<ASTFrontendActionForKernelInvastigator>().get());    
 
     if (countConditions == 0 && countBarriers == 0){
@@ -560,7 +725,8 @@ int rewriteOpenclKernel(ClangTool* tool, std::string newOutputDirectory, UserCon
     }
 
     hostCodeGenerator.initialise(userConfig, countConditions, countBarriers);
-
+    
+    llvm::outs() << "Stage 2/2: rewritting code\n";
     tool->run(newFrontendActionFactory<ASTFrontendActionForKernelRewriter>().get());
 
     if (hostCodeGenerator.isHostCodeComplete()){
@@ -570,6 +736,8 @@ int rewriteOpenclKernel(ClangTool* tool, std::string newOutputDirectory, UserCon
         hostCodeWriter << hostCodeGenerator.getGeneratedHostCode();
         hostCodeWriter.close();
     }
+
+    std::cout << "num of loops: " << countLoops << std::endl;
 
     return error_code::STATUS_OK;
 }

@@ -6,6 +6,14 @@ namespace kernel_rewriter_constants{
     const char* const LOCAL_COVERAGE_RECORDER_NAME = "my_ocl_kernel_branch_triggered_recorder";
     const char* const LOCAL_BARRIER_COUNTER_NAME = "ocl_kernel_barrier_count";
     const char* const GLOBAL_BARRIER_DIVERFENCE_RECORDER_NAME = "ocl_barrier_divergence_recorder";
+    const char* const GLOBAL_LOOP_RECORDER_NAME = "ocl_kernel_loop_recorder";
+    const char* const LOCAL_LOOP_RECORDER_NAME = "my_ocl_kernel_loop_recorder";
+    const char* const PRIVATE_LOOP_ITERATION_COUNTER = "private_ocl_kernel_loop_iter_counter";
+    const char* const PRIVATE_LOOP_BOUNDARY_RECORDER = "private_ocl_kernel_loop_boundary_reached";
+    const int LOOP_NOT_EXECUTED = 1;
+    const int LOOP_EXECUTED_ONCE = 2;
+    const int LOOP_EXECUTED_MORE_THAN_ONCE = 4;
+    const int LOOP_REACHED_BOUNDARY = 8;
     const char* const FAKE_HEADER_MACRO = "OPENCLBC_FAKE_HEADER_FOR_LIBTOOLING_";
     const char* const NEW_BARRIER_MACRO = "#define OCL_NEW_BARRIER(barrierid,arg)\\\n"\
         "{\\\n"\
