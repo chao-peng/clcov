@@ -31,11 +31,11 @@ void HostCodeGenerator::setArgument(std::string functionName, int argumentLocati
     }
     if(numBarriers){
         setArgumentPartHostCode 
-            << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation << ", sizeof(cl_mem), &d_" << barrierRecorderArrayName << ");\n";
+            << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation++ << ", sizeof(cl_mem), &d_" << barrierRecorderArrayName << ");\n";
     }
     if (numLoops) {
         setArgumentPartHostCode 
-            << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation << ", sizeof(cl_mem), &d_" << loopRecorderArrayName << ");\n";
+            << errorCodeVariable << " = clSetKernelArg(" << functionName << ", " << argumentLocation++ << ", sizeof(cl_mem), &d_" << loopRecorderArrayName << ");\n";
     }
 }
 
@@ -135,18 +135,24 @@ void HostCodeGenerator::generateHostCode(std::string dataFilePath){
     if (numLoops){
         generatedHostCode
             << "int openclbc_total_loop = " << numLoops << ";\n"
+            << "int openclbc_loop_0 = 0, openclbc_loop_1 = 0, openclbc_loop_2 = 0, openclbc_loop_boundary = 0;\n"
+            << "double openclbc_loop_0_cov, openclbc_loop_1_cov, openclbc_loop_2_cov, openclbc_loop_boundary_cov;\n"
             << "for (int cov_test_i = 0; cov_test_i < " << numLoops << "; ++cov_test_i){\n"
             << "  if ((" << loopRecorderArrayName << "[cov_test_i] & 1) == 1) {\n" 
             << "    printf(\"\\x1B[31mLoop %d was once executed for 0 iteration\\x1B[0m\\n\", cov_test_i);\n"
+            << "    openclbc_loop_0++;\n"
             << "  }\n"
             << "  if ((" << loopRecorderArrayName << "[cov_test_i] & 2) == 2) {\n" 
-            << "    printf(\"\\x1B[31mLoop %d was once executed for 1 iteration\\x1B[0m\\n\", cov_test_i);\n"
+            << "    printf(\"\\x1B[32mLoop %d was once executed for 1 iteration\\x1B[0m\\n\", cov_test_i);\n"
+            << "    openclbc_loop_1++;\n"
             << "  }\n"
             << "  if ((" << loopRecorderArrayName << "[cov_test_i] & 4) == 4) {\n" 
-            << "    printf(\"\\x1B[31mLoop %d was once executed for more than 1 iteration\\x1B[0m\\n\", cov_test_i);\n"
+            << "    printf(\"\\x1B[32mLoop %d was once executed for more than 1 iteration\\x1B[0m\\n\", cov_test_i);\n"
+            << "    openclbc_loop_2++;\n"
             << "  }\n"
             << "  if ((" << loopRecorderArrayName << "[cov_test_i] & 8) == 8) {\n" 
-            << "    printf(\"\\x1B[31mLoop %d once reached the boundary\\x1B[0m\\n\", cov_test_i);\n"
+            << "    printf(\"\\x1B[32mLoop %d once reached the boundary\\x1B[0m\\n\", cov_test_i);\n"
+            << "    openclbc_loop_boundary++;\n"
             << "  }\n"
             << "}\n";
     }
@@ -159,6 +165,17 @@ void HostCodeGenerator::generateHostCode(std::string dataFilePath){
         generatedHostCode
             << "openclbc_barrier_result = (double)openclbc_faulty_barriers / (double)openclbc_total_barriers *100.0;\n"
             << "printf(\"Faulty barrier rate: %-4.2f\\n\", openclbc_barrier_result);\n";
+    }
+    if (numLoops) {
+        generatedHostCode
+            << "openclbc_loop_0_cov = (double)openclbc_loop_0 / (double)openclbc_total_loop *100.0;\n"
+            << "openclbc_loop_1_cov = (double)openclbc_loop_1 / (double)openclbc_total_loop *100.0;\n"
+            << "openclbc_loop_2_cov = (double)openclbc_loop_2 / (double)openclbc_total_loop *100.0;\n"
+            << "openclbc_loop_boundary_cov = (double)openclbc_loop_boundary / (double)openclbc_total_loop *100.0;\n"
+            << "printf(\"Loop 0 iteration rate:           %-4.2f\\n\", openclbc_loop_0_cov);\n"
+            << "printf(\"Loop 1 iteration rate:           %-4.2f\\n\", openclbc_loop_1_cov);\n"
+            << "printf(\"Loop more than 1 iteration rate: %-4.2f\\n\", openclbc_loop_2_cov);\n"
+            << "printf(\"Loop boundary reached rate:      %-4.2f\\n\", openclbc_loop_boundary_cov);\n";
     }
     generatedHostCode
         << "}\n\n";

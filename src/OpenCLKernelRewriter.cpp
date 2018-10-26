@@ -423,9 +423,11 @@ public:
                 myRewriter.InsertTextAfter(loc, declLocalRecorder());
                 
                 // update local recorder to global recorder array
-                if (countConditions){
+                if (countConditions || countLoops){
                     loc = f->getBody()->getEndLoc();
-                    myRewriter.InsertTextAfter(loc, stmtUpdateGlobalRecorder());
+                    bool updateBranch = (countConditions != 0);
+                    bool updateLoop = (countLoops != 0);
+                    myRewriter.InsertTextAfter(loc, stmtUpdateGlobalRecorder(updateBranch, updateLoop));
                 }
 
                 // Host code generator part 2: Set argument
@@ -553,7 +555,7 @@ private:
             ss << "int " << kernel_rewriter_constants::PRIVATE_LOOP_ITERATION_COUNTER << "[" << countLoops << "];\n";
             ss << "bool " << kernel_rewriter_constants::PRIVATE_LOOP_BOUNDARY_RECORDER << "[" << countLoops << "];\n";
         }
-        ss << "barrier(LOCAL_MEM_FENCE || GLOBAL_MEM_FENCE);\n";
+        ss << "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);\n";
         return ss.str();
     }
 
@@ -606,14 +608,18 @@ private:
         return ss.str();
     }
 
-    std::string stmtUpdateGlobalRecorder(){
+    std::string stmtUpdateGlobalRecorder(bool updateBranch=true, bool updateLoop=true){
         std::stringstream ss;
-        ss << "for (int update_recorder_i = 0; update_recorder_i < " << (countConditions*2) << "; update_recorder_i++) { \n";
-        ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[update_recorder_i]); \n";
-        ss << "}\n";
-        ss << "for (int update_recorder_i = 0; update_recorder_i < " << countLoops << "; update_recorder_i++) { \n";
-        ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_LOOP_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[update_recorder_i]); \n";
-        ss << "}\n";
+        if (updateBranch) {
+            ss << "for (int update_recorder_i = 0; update_recorder_i < " << (countConditions*2) << "; update_recorder_i++) { \n";
+            ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_COVERAGE_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_COVERAGE_RECORDER_NAME << "[update_recorder_i]); \n";
+            ss << "}\n";
+        }
+        if (updateLoop) {
+            ss << "for (int update_recorder_i = 0; update_recorder_i < " << countLoops << "; update_recorder_i++) { \n";
+            ss << "  atomic_or(&" << kernel_rewriter_constants::GLOBAL_LOOP_RECORDER_NAME << "[update_recorder_i], " << kernel_rewriter_constants::LOCAL_LOOP_RECORDER_NAME << "[update_recorder_i]); \n";
+            ss << "}\n";
+        }
         return ss.str();
     }
 
